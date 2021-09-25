@@ -1,0 +1,92 @@
+---
+title: Screening for LSID errors
+author: Pieter Provoost
+editor_options: 
+  chunk_output_type: console
+output: rmdformats::robobook
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = "web") })    
+---
+
+The goal of this notebook is to screen the OBIS database for LSID issues caused by the auto increment behaviour of Excel and possibly other spreadsheet software.
+
+The first approach we will use is to look for many different LSIDs used for the same `scientificName` within a dataset.
+
+First let's get all `scientificName` and `scientificNameID` combinations by dataset:
+
+```{r error = FALSE, warning = FALSE, message = FALSE}
+library(DBI)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+
+if (!file.exists("occurrence.dat")) {
+  query <- "
+    select
+      dataset_id,
+      flat->>'scientificName' as scientificName,
+      flat->>'scientificNameID' as scientificNameID,
+      count(*) as records
+    from occurrence
+    where flat->>'scientificNameID' is not null
+    group by
+      dataset_id,
+      flat->>'scientificName',
+      flat->>'scientificNameID'
+  "
+  readRenviron("env.txt")
+  con <- dbConnect(RPostgres::Postgres(), dbname = Sys.getenv("OBIS_DB"), host = Sys.getenv("OBIS_HOST"), port = Sys.getenv("OBIS_PORT"), user = Sys.getenv("OBIS_USER"), password = Sys.getenv("OBIS_PASSWORD"), bigint = "integer")
+  res <- dbSendQuery(con, query)
+  occ <- dbFetch(res)
+  dbClearResult(res)
+  dbDisconnect(con)
+  save(occ, file = "occurrence.dat")
+} else {
+  load("occurrence.dat")
+}
+
+head(occ)
+```
+
+Now we can calculate by dataset how many `scientificNameID` values there per `scientificName`:
+
+```{r error = FALSE, warning = FALSE, message = FALSE}
+stats <- occ %>%
+  filter(!is.na(scientificname)) %>%
+  group_by(dataset_id, scientificname) %>%
+  summarize(ids = length(unique(scientificnameid)), records = sum(records))
+
+stats
+```
+
+Let's visualize:
+
+```{r error = FALSE, warning = FALSE, message = FALSE}
+ggplot(stats) +
+  geom_histogram(aes(ids), binwidth = 1) +
+  scale_y_continuous(trans = "log10")
+```
+
+Now check the datasets with 5 or more identifiers per name:
+
+```{r error = FALSE, warning = FALSE, message = FALSE}
+stats_nok <- stats %>%
+  filter(ids >= 5)
+
+stats_nok %>%
+  rmarkdown::paged_table()
+```
+
+Then get the problematic datasets:
+
+```{r error = FALSE, warning = FALSE, message = FALSE}
+datasets <- robis::dataset() %>%
+  select(id, url)
+
+stats_nok %>%
+  group_by(dataset_id) %>%
+  summarize(species_nok = n(), records = sum(records)) %>%
+  left_join(datasets, by = c("dataset_id" = "id")) %>%
+  arrange(desc(records)) %>%
+  kable()
+```

@@ -5,7 +5,7 @@ editor_options:
   chunk_output_type: console
 output: rmdformats::robobook
 knit: (function(inputFile, encoding) {
-  rmarkdown::render(inputFile, encoding = encoding, output_dir = "web") })    
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = "docs") })    
 ---
 
 The goal of this notebook is to screen the OBIS database for LSID issues caused by the auto increment behaviour of Excel and possibly other spreadsheet software.
